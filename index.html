@@ -50,7 +50,7 @@ button,input,select{font:inherit}.hidden{display:none!important}.shell{width:min
   <div class="home-head"><div><h1 class="brand">BioDen</h1><div class="brand-sub">GeoDen-style study sessions built directly from your anatomy &amp; physiology PDFs.</div></div><div class="head-tools"><button class="icon-btn" id="homeProgressBtn">Progress</button></div></div>
   <section class="today-card"><div class="today-row"><div><div class="eyebrow">Today</div><div class="today-title" id="goalTitle">0 / 20 facts</div><div class="today-meta" id="goalMeta">20 facts to complete today’s goal.</div></div><div class="streak"><div class="streak-num" id="streakNum">0</div><div class="streak-label">day streak</div></div></div><div class="goal-track"><div class="goal-fill" id="goalFill"></div></div><div class="daily-row"><div><div class="daily-title">Daily BioDen</div><div class="daily-meta">10 source-backed questions · ramps from foundations to challenge</div></div><button class="mini-primary" id="dailyBtn">Play →</button></div></section>
   <section class="section"><div class="section-title">Choose what to do</div><div class="mode-groups">
-   <div><div class="group-label">Learn &amp; review</div><div class="mode-grid"><button class="mode active" data-mode="flash"><div class="mode-name">Flash card</div><div class="mode-meta">Reveal and self-score</div></button><button class="mode" data-mode="quiz"><div class="mode-name">Quiz</div><div class="mode-meta">Plausible distractors</div></button><button class="mode" data-mode="matching"><div class="mode-name">Matching</div><div class="mode-meta">Related concepts only</div></button></div></div>
+   <div><div class="group-label">Learn &amp; review</div><div class="mode-grid"><button class="mode active" data-mode="flash"><div class="mode-name">Flash card</div><div class="mode-meta">Reveal and self-score</div></button><button class="mode" data-mode="quiz"><div class="mode-name">Quiz</div><div class="mode-meta">Multiple choice + short terms</div></button><button class="mode" data-mode="matching"><div class="mode-name">Matching</div><div class="mode-meta">Related concepts only</div></button></div></div>
    <div><div class="group-label">Games</div><div class="mode-grid"><button class="mode" data-mode="detective"><div class="mode-name">Detective</div><div class="mode-meta">Guess a concept from progressive clues</div></button><button class="mode" data-mode="sequence"><div class="mode-name">Pathway</div><div class="mode-meta">Build processes in the correct order</div></button><button class="mode" data-mode="rapid"><div class="mode-name">Rapid Fire</div><div class="mode-meta">60-second mixed recall</div></button></div></div>
   </div></section>
   <section class="section"><div class="section-title">Systems</div><div class="system-grid" id="systemGrid"><button class="chip active" data-system="All">All systems</button><button class="chip" data-system="Digestive">Digestive</button><button class="chip" data-system="Cardiovascular">Cardiovascular</button><button class="chip" data-system="Muscular">Muscular</button><button class="chip" data-system="Respiratory">Respiratory</button></div></section>
@@ -540,9 +540,25 @@ function semanticDistractors(card){
   ranked.sort((a,b)=>b.s-a.s);
   return uniqueText(ranked.map(x=>x.c.a)).slice(0,3);
 }
+function typedQuizAllowed(card){
+  // Quiz is primarily multiple choice. Typing is reserved for short, atomic
+  // labels such as a named muscle, bone, chamber, layer or other single term.
+  // Never ask the learner to reproduce a sentence, explanation, list or pathway.
+  const a=String(card.a||'').trim(),q=normalise(card.q),f=questionFamily(card),k=answerKind(card),wc=wordCount(a);
+  if(!a||k!=='term'||wc>4)return false;
+  if(/[;,.:!?=]|→/.test(a))return false;
+  if(['function','rationale','composition','direction','relation','list','sequence','paired','numeric'].includes(f))return false;
+  // Catch function/explanation stems that the broad question classifier may not
+  // label perfectly (for example, “What functions does … support?”).
+  if(/^(why|how)\b/.test(q)||/\b(what function|what functions|what role|what roles|what effect|what effects|what happens|primary function|main function)\b/.test(q))return false;
+  const namedTarget=/\b(bone|muscle|organ|structure|vessel|artery|vein|valve|chamber|cell|enzyme|hormone|layer|region|band|protein|nerve|plexus|sphincter|tissue|epithelium|joint|ligament|tendon|term|name)\b/.test(q);
+  if(namedTarget)return true;
+  // A one- or two-word anatomical/physiological term is also safe when the
+  // stem is explicitly asking for a term, definition or location.
+  return wc<=2&&['term','definition','location'].includes(f);
+}
 function makeQuizItem(card){
   const f=questionFamily(card),sig=questionSignature(card);
-  if(card.quizMode==='typed')return {card,prompt:card.q,correct:card.a,type:'typed',options:[]};
   let options=null;
   if(Array.isArray(card.quizOptions)&&card.quizOptions.length>=3){
     const vals=uniqueText(card.quizOptions);
@@ -564,9 +580,9 @@ function makeQuizItem(card){
   if(options){options=uniqueText(options.map(o=>answerMatches(card,o)?card.a:o));}
   if(options&&options.length>4)options=options.slice(0,4);
   if(options&&options.length>=3)return {card,prompt:card.q,correct:card.a,type:'mcq',options};
-  // If a clean MCQ cannot be built, use recall rather than padding with nonsense.
-  const typedOK=wordCount(card.a)<=12 && String(card.a).length<=105 && !String(card.a).includes('→');
-  return typedOK?{card,prompt:card.q,correct:card.a,type:'typed',options:[]}:{card,prompt:card.q,correct:card.a,type:'skip',options:[]};
+  // No sentence-length free recall in Quiz. If a fair MCQ cannot be built,
+  // only keep the card when the answer is a short, unambiguous named term.
+  return typedQuizAllowed(card)?{card,prompt:card.q,correct:card.a,type:'typed',options:[]}:{card,prompt:card.q,correct:card.a,type:'skip',options:[]};
 }
 function quizReady(c){return quizEligible(c)&&makeQuizItem(c).type!=='skip';}
 function rapidReady(c){const i=makeQuizItem(c);return i.type==='mcq'&&i.options.length>=3;}
@@ -803,7 +819,7 @@ function renderQuiz(){
   setHeader(`${c.topic} · ${difficultyLabel(c)} · ${app.index+1} of ${app.session.length}`,'Quiz',c.system);
   setProgress(app.index+1,app.session.length,`${app.score} correct`);
   if(item.type==='typed'){
-    els.stage.innerHTML=`<div class="stage-label">${difficultyLabel(c)} · Recall from memory</div><h1 class="prompt">${esc(item.prompt)}</h1><div class="detective-card" style="margin-top:16px"><div class="guess-row"><input id="typedQuizInput" placeholder="Type the answer…" autocomplete="off" autocapitalize="off"><button id="typedQuizBtn">Check</button></div><div class="hint-line">No fake distractors here — this fact is cleaner as free recall.</div><div class="feedback" id="quizFeedback"></div><div class="quiz-explain hidden" id="quizExplain"></div><div class="source hidden" id="quizSource">${esc(sourceLine(c))}</div></div>`;
+    els.stage.innerHTML=`<div class="stage-label">${difficultyLabel(c)} · Short term recall</div><h1 class="prompt">${esc(item.prompt)}</h1><div class="detective-card" style="margin-top:16px"><div class="guess-row"><input id="typedQuizInput" placeholder="Type the term…" autocomplete="off" autocapitalize="off"><button id="typedQuizBtn">Check</button></div><div class="hint-line">Short-answer typing is only used for a single named structure or term — never for sentence-length explanations.</div><div class="feedback" id="quizFeedback"></div><div class="quiz-explain hidden" id="quizExplain"></div><div class="source hidden" id="quizSource">${esc(sourceLine(c))}</div></div>`;
     showControls({back:app.index>0,mainVisible:false});
     $('typedQuizBtn').onclick=submitTypedQuiz;
     $('typedQuizInput').addEventListener('keydown',e=>{if(e.key==='Enter')submitTypedQuiz()});
@@ -916,6 +932,6 @@ function updateStartButton(){const label={flash:'Flash card',quiz:'Quiz',matchin
 $('sessionSize').onchange=e=>app.size=e.target.value;$('difficulty').onchange=e=>{app.difficulty=e.target.value;const help={adaptive:'Adaptive starts with direct recall, then moves into relationships and multi-step mechanisms as related material is learned.',foundational:'Direct structures, definitions and core functions.',intermediate:'Relationships, comparisons and multi-part physiology.',advanced:'Multi-step mechanisms, regulation, integration and fine distinctions.',all:'All difficulty levels without a deliberate ramp.'};$('difficultyHelp').textContent=help[app.difficulty]||help.adaptive;};$('startBtn').onclick=()=>startSession();$('dailyBtn').onclick=()=>startSession({daily:true});$('menuBtn').onclick=openHome;$('progressBtn').onclick=openProgress;$('homeProgressBtn').onclick=openProgress;$('progressClose').onclick=()=>els.progressOverlay.classList.add('hidden');els.progressOverlay.onclick=e=>{if(e.target===els.progressOverlay)els.progressOverlay.classList.add('hidden')};els.main.onclick=nextAction;els.back.onclick=backAction;els.got.onclick=()=>rateFlash(true);els.missed.onclick=()=>rateFlash(false);$('resetBtn').onclick=()=>{if(confirm('Reset all BioDen progress on this browser?')){progress=blankProgress();saveProgress();renderProgress();toast('BioDen progress reset');}};
 window.addEventListener('keydown',e=>{if(!els.home.classList.contains('hidden')||!els.progressOverlay.classList.contains('hidden'))return;if(app.mode==='flash'){if(e.key===' '&&!app.revealed){e.preventDefault();revealFlash()}else if(app.revealed&&e.key==='ArrowRight')rateFlash(true);else if(app.revealed&&e.key==='ArrowDown')rateFlash(false);}});
 
-updateHomeStats();updateStartButton();setHeader('Biology study game','Choose a mode to begin','4 systems');els.stage.innerHTML=`<div class="stage-label">BioDen</div><h1 class="prompt">Turn your lecture PDFs into active recall.</h1><div class="prompt-note">Flash cards, quiz, matching, progressive clues, pathways and rapid fire — difficulty-calibrated, source-audited, and stricter about only using plausible multiple-choice distractors, with progress saved on this device.</div>`;showControls({back:false,main:'Open menu →'});els.main.onclick=openHome;
+updateHomeStats();updateStartButton();setHeader('Biology study game','Choose a mode to begin','4 systems');els.stage.innerHTML=`<div class="stage-label">BioDen</div><h1 class="prompt">Turn your lecture PDFs into active recall.</h1><div class="prompt-note">Flash cards, quiz, matching, progressive clues, pathways and rapid fire — difficulty-calibrated and source-audited. Quiz is now multiple-choice first; typing is only used for short, unambiguous named terms, never sentence-length recall. Progress is saved on this device.</div>`;showControls({back:false,main:'Open menu →'});els.main.onclick=openHome;
 </script>
 </body></html>
